@@ -1,0 +1,326 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <title>반도체 공급망 관계도 (클릭 하이라이트 추가)</title>
+    <script src="https://unpkg.com/d3@7.8.5/dist/d3.min.js"></script>
+    <style>
+        body {
+            font-family: 'Malgun Gothic', 'Apple SD Gothic Neo', sans-serif;
+            margin: 0;
+            overflow: hidden;
+            background-color: #1a202c;
+        }
+        #container {
+            width: 100vw;
+            height: 100vh;
+        }
+        .link {
+            stroke: #4a5568;
+            stroke-opacity: 0.4;
+            stroke-width: 1.5px;
+            fill: none;
+            transition: stroke-opacity 0.3s, stroke 0.3s, stroke-width 0.3s;
+        }
+        /* 하이라이트 상태의 연결선 스타일 (점등 효과) */
+        .link.highlighted {
+            stroke: #38bdf8; /* 밝은 하늘색으로 점등 */
+            stroke-opacity: 1.0;
+            stroke-width: 3px;
+        }
+        /* 포커스에서 벗어난 흐려진 요소들 */
+        .link.dimmed {
+            stroke-opacity: 0.05;
+        }
+        .node {
+            transition: opacity 0.3s;
+        }
+        .node.dimmed {
+            opacity: 0.15; /* 관련 없는 기업은 흐리게 처리 */
+        }
+        .node circle {
+            stroke: #2d3748;
+            stroke-width: 1.5px;
+            cursor: pointer;
+            transition: stroke 0.3s, stroke-width 0.3s, filter 0.3s;
+        }
+        /* 선택된 중심 노드 강조 */
+        .node.selected circle {
+            stroke: #fff;
+            stroke-width: 3px;
+            filter: drop-shadow(0 0 8px rgba(255,255,255,0.8));
+        }
+        .node text {
+            font-size: 11px;
+            font-weight: bold;
+            pointer-events: none;
+            text-anchor: middle;
+            fill: #e2e8f0;
+            text-shadow: 0 1px 3px rgba(0,0,0,0.8);
+        }
+        .tooltip {
+            position: fixed;
+            padding: 8px 12px;
+            background: rgba(0, 0, 0, 0.9);
+            color: #fff;
+            border-radius: 6px;
+            font-size: 12px;
+            pointer-events: none;
+            opacity: 0;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.5);
+            border: 1px solid #4a5568;
+            z-index: 10;
+        }
+    </style>
+</head>
+<body>
+
+<div id="container"></div>
+<div class="tooltip" id="tooltip"></div>
+
+<script>
+    const rawData = {
+        "에이티아이케이": ["삼성전자", "LG전자", "SEMES", "원익아이피에스", "KC텍", "주성"],
+        "씨스콤": ["삼성전자", "SKHynix"],
+        "씨에스케이": ["삼성전자", "SKHynix"],
+        "싸이맥스": ["삼성전자", "에스에프에이", "3S", "로체시스템즈", "라온테크", "저스템", "원익아이피에스"],
+        "디바이스이엔지": ["삼성전자", "SKHynix", "BOE", "디엠에스", "야스", "AP시스템", "KC텍", "한화정밀"],
+        "디아이": ["삼성전자", "SKHynix", "DB하이텍", "KC텍", "신성이엔지", "SEMES", "유니셈", "원익IPS"],
+        "한국에바라정밀기계": ["삼성전자", "SKHynix", "마이크론", "어드반TES트코리아", "엑셀리스코리아"],
+        "에코엔전": ["삼성전자", "SKHynix", "LG전자"],
+        "이오테크닉스": ["삼성전자", "SKHynix", "TSMC", "주성", "SEMES", "삼성디스플레이", "한미반도체"],
+        "이솔": ["삼성전자", "SKHynix", "ASML", "TEL", "원익IPS"],
+        "포이source": ["삼성전자", "SKHynix", "DB하이텍", "ISC", "TES나"],
+        "제너셈": ["삼성전자", "SKHynix", "TSMC", "INTEL", "AMKOR", "ASE", "LG디스플레이", "주성", "AP시"],
+        "제니어스": ["삼성디스플레이", "LG디스플레이", "BOE", "CSOT"],
+        "지오엘리먼트": ["삼성전자", "SKHynix", "GLOBALFOUNDRIES", "UMC", "TES", "PSK", "SK실트론"],
+        "기가레인": ["삼성전자", "KC텍", "유진테크", "PSK", "SFA", "주성", "SEMES", "한미반도체", "LG전자"],
+        "지앤비에스": ["삼성전자", "LG전자", "TCL", "HISENSE"],
+        "쥐에스티": ["삼성전자", "SKHynix", "MICRON", "TOSHIBA"],
+        "한미반도체": ["SKHynix", "AMKOR", "ASE", "STATS CHIPPAC", "주성", "유진테크", "삼성디스플레이"],
+        "한화정밀기계": ["삼성전자", "LG전자", "SKHynix", "원익IPS", "주성", "삼성전기", "SEMES", "삼성SDI"],
+        "한양이엔지": ["삼성전자", "SKHynix", "TSMC", "INTEL", "LG전자", "삼성디스플레이", "주성", "SEMES"],
+        "하이퓨리티": ["삼성전자", "SKHynix", "TSMC", "INTEL", "PSI"],
+        "HIT": ["삼성전자", "SKHynix", "MICRON", "TOSHIBA"],
+        "HJS": ["삼성전자", "SKHynix", "AMKOR", "ASE"],
+        "이노맥스": ["삼성전자", "SKHynix"],
+        "아이리서치": ["삼성전자", "SKHynix", "TES", "원익IPS", "주성", "SEMES", "SFA"],
+        "지올코리아": ["삼성전자", "칼자이스"],
+        "저스템": ["삼성전자", "SKHynix", "TES", "주성", "KC텍", "원익IPS", "한화정밀기계", "삼성디스플레이"],
+        "주성": ["서울반도체", "티씨케이", "KC", "원익홀딩스", "인베 نیا", "피SK홀딩스", "디엠에스", "삼성디"],
+        "케이케이테크": ["시마즈한국진공기기", "다산", "한국알박크라이오", "엘오티베큠", "파이퍼베큠코"],
+        "케이씨텍": ["SEMES", "SK실트론", "SKHynix", "동우화인켐", "LG디스플레이", "솔브레인", "LG이노텍"],
+        "케이씨이노베이션": ["유니셈", "삼성전자", "SKHynix"],
+        "고영테크놀러지": ["삼성전자", "LG전자", "주성", "탑엔지니어링", "에프에스티", "삼성SDI", "LG디스플"],
+        "국제전기": ["삼성전자", "SKHynix"],
+        "코리아테크노": ["삼성전자", "SKHynix", "SEMES", "SFA", "원익IPS", "LG전자", "KC텍", "삼성디스플"],
+        "코스텍시스템": ["삼성전자", "SKHynix"],
+        "코비스테크놀로지": ["SEMES", "ISC", "한화시스템", "SKHynix", "원익IPS", "LG전자", "삼성디스플"],
+        "리드": ["삼성전자", "SKHynix"],
+        "엘에스텍": ["삼성전자", "SKHynix"],
+        "엘에스이주식회사": ["삼성전자", "SKHynix"],
+        "엠에이티플러스": ["삼성전자", "SKHynix", "KC텍", "SEMES", "SK실트론", "삼성디스플레이", "원익IPS"],
+        "멜콘": ["삼성전자", "SKHynix", "SK실트론", "삼성SDI", "LG디스플레이", "LG이노텍", "TES", "삼성디스"],
+        "메티스": ["삼성전자", "SKHynix"],
+        "엔이티": ["삼성전자", "SKHynix"],
+        "넥스틴": ["삼성전자", "SKHynix", "주성", "SFA", "SEMES", "삼성전기", "한화정밀기계", "삼성디스플"],
+        "엔티에스": ["삼성전자", "SKHynix", "TES", "SK실트론", "KC텍", "삼성디스플레이", "LG전자"],
+        "팸텍": ["삼성전자", "SKHynix", "KC텍", "탑엔지니어링", "SFA", "TES", "티에프이", "주성", "SK실트론"],
+        "PEMTRON": ["삼성전자", "SKHynix", "LG에너지솔루션", "SK온", "삼성디스플레이", "원익피앤이"],
+        "프로텍": ["삼성전자", "SKHynix", "앰코테크놀로지(AMKOR TECHNOLOGY)", "LG전자", "스태츠칩팩"],
+        "PSK": ["삼성전자", "SKHynix", "마이크론"],
+        "피티씨": ["삼성전자", "SKHynix", "SEMES", "테크윙", "LG디스플레이", "KC텍", "LG전자", "마이크론"],
+        "라온테크": ["삼성전자", "SKHynix", "SEMES", "한미반도체", "한화정밀기계", "테크윙", "TES", "PSK"],
+        "세메스": ["삼성전자", "SKHynix", "LG전자", "KC", "주성", "로체시스템즈", "KC텍", "디엠에스", "삼성디"],
+        "세믹스": ["삼성전자", "SKHynix"],
+        "STI": ["삼성전자", "SKHynix", "삼성디스플레이", "LG전자", "SEMES", "아바코", "SFA", "LG이노텍"],
+        "테키스트": ["삼성전자", "SKHynix"],
+        "테스": ["삼성전자", "SKHynix", "주성", "원익IPS", "PSK", "LG디스플레이", "삼성디스플레이", "제우스"],
+        "티케이씨": ["삼성전자", "SKHynix", "SEMES", "삼성디스플레이", "심텍", "KC텍", "삼성전기", "한화정"],
+        "알박": ["삼성전자", "SKHynix", "LG전자", "KC텍", "디엠에스", "PSK", "아바코", "KC", "AP시스템"],
+        "유니테스트": ["SKHynix", "진성이엔지"],
+        "위드텍": ["삼성전자", "SKHynix", "LG전자", "SFA", "TES", "삼성디스플레이", "한화정밀기계", "KC텍"],
+        "원익아이피에스": ["삼성전자", "SKHynix", "LG전자", "TES", "FST", "SEMES", "삼성디스플레이", "유진"],
+        "자비스": ["삼성전자", "SKHynix", "LG전자", "원익IPS", "케이티", "LG이노텍", "삼성디스플레이", "주성"],
+        "와이씨": ["삼성전자", "SKHynix", "LG전자", "삼성전기", "LG디스플레이", "TES", "SEMES", "한화시스"],
+        "에스티": ["삼성전자", "SKHynix", "LG전자", "한화솔루션", "원익IPS", "주성", "한화정밀기계", "SEMES"],
+        "제우스": ["삼성전자", "SKHynix", "LG전자", "한화오션", "SK실트론", "삼성디스플레이", "원익홀딩스"],
+        "NEOSEM": ["삼성전자", "SKHynix", "LG전자", "SEMES", "삼성디스플레이", "탑엔지니어링", "세믹스"]
+    };
+
+    const majorCompanies = {
+        "삼성전자": { color: "#3182ce", radius: 26, group: "IDM" },
+        "SKHynix": { color: "#dd6b20", radius: 26, group: "IDM" },
+        "SK하이닉스": { color: "#dd6b20", radius: 26, group: "IDM" },
+        "TSMC": { color: "#e53e3e", radius: 24, group: "Foundry" },
+        "INTEL": { color: "#00c6ff", radius: 24, group: "IDM" },
+        "MICRON": { color: "#319795", radius: 22, group: "Memory" },
+        "마이크론": { color: "#319795", radius: 22, group: "Memory" },
+        "LG전자": { color: "#b83280", radius: 22, group: "Consumer" },
+        "삼성디스플레이": { color: "#805ad5", radius: 22, group: "Display" },
+        "삼성디": { color: "#805ad5", radius: 22, group: "Display" },
+        "LG디스플레이": { color: "#805ad5", radius: 22, group: "Display" },
+        "LG디스플": { color: "#805ad5", radius: 22, group: "Display" },
+        "BOE": { color: "#4a5568", radius: 20, group: "Display" }
+    };
+
+    const nodeSet = new Set();
+    const links = [];
+
+    Object.keys(rawData).forEach(source => {
+        nodeSet.add(source);
+        rawData[source].forEach(target => {
+            nodeSet.add(target);
+            links.push({ source: source, target: target });
+        });
+    });
+
+    const nodes = Array.from(nodeSet).map(id => {
+        if (majorCompanies[id]) return { id: id, ...majorCompanies[id] };
+        return { id: id, color: "#4cbd74", radius: 12, group: "협력/장비사" };
+    });
+
+    const width = window.innerWidth;
+    const height = window.innerHeight;
+
+    const svg = d3.select("#container")
+        .append("svg")
+        .attr("width", width)
+        .attr("height", height);
+
+    const g = svg.append("g");
+    
+    // 바탕화면 클릭 시 하이라이트 초기화 기능 연동
+    svg.call(d3.zoom().scaleExtent([0.1, 4]).on("zoom", (event) => {
+        g.attr("transform", event.transform);
+    })).on("click", function(event) {
+        if (event.target.tagName === 'svg') {
+            clearHighlight();
+        }
+    });
+
+    const simulation = d3.forceSimulation(nodes)
+        .force("link", d3.forceLink(links).id(d => d.id).distance(120))
+        .force("charge", d3.forceManyBody().strength(-280))
+        .force("center", d3.forceCenter(width / 2, height / 2))
+        .force("collision", d3.forceCollide().radius(d => d.radius + 15));
+
+    const tooltip = d3.select("#tooltip");
+
+    const link = g.append("g")
+        .selectAll("line")
+        .data(links)
+        .enter().append("line")
+        .attr("class", "link");
+
+    const node = g.append("g")
+        .selectAll(".node")
+        .data(nodes)
+        .enter().append("g")
+        .attr("class", "node")
+        .call(drag(simulation));
+
+    node.append("circle")
+        .attr("r", d => d.radius)
+        .attr("fill", d => d.color);
+
+    node.append("text")
+        .attr("dy", d => d.radius + 13)
+        .style("font-size", d => d.radius > 15 ? "12px" : "10px")
+        .style("fill", d => d.radius > 15 ? "#fff" : "#cbd5e0")
+        .text(d => d.id);
+
+    // --- 인터랙션 로직 설계 ---
+    let selectedNode = null;
+
+    // 각 노드별 연결된 인접 노드 목록 색인용 맵 빌드
+    const linkedByIndex = {};
+    links.forEach(d => {
+        linkedByIndex[`${d.source.id || d.source},${d.target.id || d.target}`] = 1;
+        linkedByIndex[`${d.target.id || d.target},${d.source.id || d.source}`] = 1;
+    });
+
+    function isConnected(a, b) {
+        return linkedByIndex[`${a.id},${b.id}`] || a.id === b.id;
+    }
+
+    // 마우스 오버 (툴팁만 제어)
+    node.on("mouseover", function(event, d) {
+        tooltip.style("opacity", 1)
+               .html(`<strong>기업명:</strong> ${d.id}<br/><strong>그룹:</strong> ${d.group}`);
+    })
+    .on("mousemove", function(event) {
+        tooltip.style("left", (event.clientX + 15) + "px")
+               .style("top", (event.clientY - 15) + "px");
+    })
+    .on("mouseout", function() {
+        tooltip.style("opacity", 0);
+    })
+    // 클릭 이벤트 (점등 및 포커싱 제어)
+    .on("click", function(event, d) {
+        event.stopPropagation(); // 바탕화면 클릭 이벤트 버블링 차단
+
+        // 이미 선택된 상태라면 선택 해제
+        if (selectedNode === d) {
+            clearHighlight();
+            return;
+        }
+
+        selectedNode = d;
+
+        // 노드 토글 효과 처리
+        node.classed("selected", n => n === d)
+            .classed("dimmed", n => !isConnected(d, n));
+
+        // 링크(선) 토글 및 컬러 점등 처리
+        link.classed("highlighted", l => l.source === d || l.target === d)
+            .classed("dimmed", l => l.source !== d && l.target !== d);
+    });
+
+    // 하이라이트 원복 함수
+    function clearHighlight() {
+        selectedNode = null;
+        node.classed("selected", false).classed("dimmed", false);
+        link.classed("highlighted", false).classed("dimmed", false);
+    }
+
+    simulation.on("tick", () => {
+        link
+            .attr("x1", d => d.source.x)
+            .attr("y1", d => d.source.y)
+            .attr("x2", d => d.target.x)
+            .attr("y2", d => d.target.y);
+
+        node
+            .attr("transform", d => `translate(${d.x}, ${d.y})`);
+    });
+
+    function drag(simulation) {
+        function dragstarted(event, d) {
+            if (!event.active) simulation.alphaTarget(0.2).restart();
+            d.fx = d.x;
+            d.fy = d.y;
+        }
+        function dragged(event, d) {
+            d.fx = event.x;
+            d.fy = event.y;
+        }
+        function dragended(event, d) {
+            if (!event.active) simulation.alphaTarget(0);
+            d.fx = null;
+            d.fy = null;
+        }
+        return d3.drag()
+            .on("start", dragstarted)
+            .on("drag", dragged)
+            .on("end", dragended);
+    }
+
+    window.addEventListener('resize', () => {
+        svg.attr("width", window.innerWidth).attr("height", window.innerHeight);
+        simulation.force("center", d3.forceCenter(window.innerWidth / 2, window.innerHeight / 2)).alpha(0.2).restart();
+    });
+</script>
+
+</body>
+</html>
